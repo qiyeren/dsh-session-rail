@@ -11,7 +11,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
-    const { useEffect, useState } = React;
+    const { useEffect, useState, useRef } = React;
 
     const API = '/api/session-rail';
     /** One id per page load, so repeated boots are distinguishable in /state. */
@@ -963,6 +963,35 @@ window.__ModuleLoader__.load({
       const [pinned, setPinned] = useState(false);
       const [anchor, setAnchor] = useState(null);
 
+      /**
+       * Grace period before a hover-only panel actually hides after the pointer
+       * leaves the chip/panel subtree. The panel is a fixed-position child that
+       * sits just below the chip, so a fast or slightly diagonal move can clip a
+       * few pixels of bare header on the way down. Without a short wait, the
+       * `onMouseLeave` `setOpen(false)` unmounts the panel before the pointer
+       * ever reaches it — the "menu vanishes mid-flight" bug. Re-entering the
+       * subtree cancels the pending close; a pinned panel never auto-closes.
+       */
+      const HOVER_CLOSE_GRACE_MS = 180;
+      const closeTimer = useRef(null);
+      const pinnedRef = useRef(false);
+      useEffect(() => { pinnedRef.current = pinned; }, [pinned]);
+      const cancelClose = () => {
+        if (closeTimer.current !== null) {
+          clearTimeout(closeTimer.current);
+          closeTimer.current = null;
+        }
+      };
+      const scheduleClose = () => {
+        cancelClose();
+        if (pinnedRef.current) return;
+        closeTimer.current = setTimeout(() => {
+          closeTimer.current = null;
+          if (!pinnedRef.current) setOpen(false);
+        }, HOVER_CLOSE_GRACE_MS);
+      };
+      useEffect(() => () => cancelClose(), []);
+
       // A pinned panel has to close on a click outside itself, not only on Esc.
       useEffect(() => {
         if (!pinned) return undefined;
@@ -971,6 +1000,7 @@ window.__ModuleLoader__.load({
           const root = typeof document.querySelector === 'function' ? document.querySelector('.sr-hdr-wrap') : null;
           const target = event?.target;
           if (root && target && typeof root.contains === 'function' && root.contains(target)) return;
+          cancelClose();
           setPinned(false);
           setOpen(false);
         };
@@ -1004,8 +1034,17 @@ window.__ModuleLoader__.load({
           setAnchor({ top: 56, right: 24 });
           return;
         }
+        // Start the fixed wrapper exactly at the chip's bottom edge. The old
+        // `+ 6` left a 6px strip of bare header between the chip and the wrapper
+        // that belonged to NO element in this subtree: the moment the pointer
+        // crossed it, React fired onMouseLeave on the wrap and unmounted the
+        // panel before the pointer could reach it (the reported bug). With top
+        // aligned to rect.bottom, panelWrap's own 6px padding-top IS that visual
+        // gap — and it is a DOM descendant of the wrap, so hovering it no longer
+        // counts as leaving the subtree. Vertical travel chip → panel is now one
+        // continuous hover.
         setAnchor({
-          top: Math.round(rect.bottom + 6),
+          top: Math.round(rect.bottom),
           right: Math.max(8, Math.round(window.innerWidth - rect.right)),
         });
       };
@@ -1111,23 +1150,30 @@ window.__ModuleLoader__.load({
         style: HDR.wrap,
         className: 'sr-hdr-wrap',
         onMouseEnter: (event) => {
+          // Re-entering (chip OR panel, they are one subtree) cancels a pending
+          // close — this is what lets the pointer finish the trip into the panel.
+          cancelClose();
           place(event);
           setOpen(true);
         },
-        // Peek closes on leave; a pinned panel survives the trip to it.
+        // Peek closes shortly after leave, not instantly; a pinned panel never
+        // auto-closes. The grace also absorbs a pointer that briefly clips the
+        // bare header on a diagonal path that leaves the wrapper's bounding box.
         onMouseLeave: () => {
-          if (!pinned) setOpen(false);
+          scheduleClose();
         },
         onFocus: (event) => {
+          cancelClose();
           place(event);
           setOpen(true);
         },
         onBlur: (event) => {
           if (pinned) return;
-          if (!event.currentTarget.contains?.(event.relatedTarget)) setOpen(false);
+          if (!event.currentTarget.contains?.(event.relatedTarget)) scheduleClose();
         },
         onKeyDown: (event) => {
           if (event.key === 'Escape') {
+            cancelClose();
             setPinned(false);
             setOpen(false);
           }
@@ -1147,7 +1193,10 @@ window.__ModuleLoader__.load({
           onClick: (event) => {
             // Click pins the menu open instead of jumping somewhere: the rows
             // inside are the navigation, and a click-to-navigate chip would make
-            // "open the list" impossible with a mouse.
+            // "open the list" impossible with a mouse. Cancel any queued
+            // hover-close first, otherwise a pending timer could unmount a
+            // panel the user just pinned.
+            cancelClose();
             place(event);
             setPinned(!pinned);
             setOpen(true);

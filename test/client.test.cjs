@@ -11,6 +11,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '..');
+const CLIENT_SOURCE = path.join(ROOT, 'client.js');
 
 // ---------------------------------------------------------------- React stub
 let cursor = null;
@@ -32,6 +33,12 @@ const React = {
     return [scope.slots.v[index], (next) => {
       scope.slots.v[index] = typeof next === 'function' ? next(scope.slots.v[index]) : next;
     }];
+  },
+  useRef(init) {
+    const scope = cursor;
+    const index = scope.slots.i++;
+    if (!(index in scope.slots.v)) scope.slots.v[index] = { current: init };
+    return scope.slots.v[index];
   },
   useEffect(fn) {
     cursor.slots.effects.push(fn);
@@ -98,7 +105,7 @@ function loadModule() {
     clearTimeout() {},
   };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8'), sandbox, { filename: 'client.js' });
+  vm.runInContext(fs.readFileSync(CLIENT_SOURCE, 'utf8'), sandbox, { filename: 'client.js' });
   loaded.sandbox = sandbox;
   return loaded;
 }
@@ -318,6 +325,95 @@ async function mount(component, props) {
   const wrapNode = pinned.nodes.find((node) => node.props && node.props.className === 'sr-hdr-wrap');
   assert.ok(wrapNode, 'the wrap carries the class the outside-click handler looks up');
   assert.equal(wrapNode.props.style.position, 'relative');
+
+  // 9b. Hovering across the chip/panel gap must not immediately dismiss it.
+  // This uses a deterministic clock and the real HeaderCounts event handlers;
+  // layout values are checked here, while DOM hit-testing still needs a UI test.
+  const originalTimeout = sandbox.setTimeout;
+  const originalClearTimeout = sandbox.clearTimeout;
+  const originalWidth = sandbox.window.innerWidth;
+  let clock = 0;
+  let nextTimer = 1;
+  const timers = new Map();
+  sandbox.window.innerWidth = 1200;
+  sandbox.setTimeout = (fn, delay) => {
+    const id = nextTimer++;
+    timers.set(id, { at: clock + Number(delay), fn });
+    return id;
+  };
+  sandbox.clearTimeout = (id) => { timers.delete(id); };
+  const advanceClock = (ms) => {
+    const end = clock + ms;
+    for (;;) {
+      const next = [...timers.entries()]
+        .filter(([, timer]) => timer.at <= end)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+      if (!next) break;
+      clock = next[1].at;
+      timers.delete(next[0]);
+      next[1].fn();
+    }
+    clock = end;
+  };
+  try {
+    states.delete(internals.HeaderCounts);
+    localStore.clear();
+    const hoverProps = { rail: { ctx: makeCtx(pinRows), currentId: 'mine' } };
+    await mount(internals.HeaderCounts, hoverProps);
+    let view = await mount(internals.HeaderCounts, hoverProps);
+    const wrap = () => view.nodes.find((node) => node.props?.className === 'sr-hdr-wrap');
+    const button = () => view.nodes.find((node) => node.props?.className === 'sr-hdr-chip');
+    const panel = () => view.nodes.find((node) => node.props?.id === 'session-rail-header-panel');
+    const pointer = { currentTarget: { getBoundingClientRect: () => ({ bottom: 100, right: 900 }) } };
+    const redraw = async () => { view = await mount(internals.HeaderCounts, hoverProps); };
+
+    wrap().props.onMouseEnter(pointer);
+    await redraw();
+    assert.ok(panel(), 'hover opens the panel');
+    assert.equal(panel().props.style.top, '100px', 'the wrapper starts at the button bottom');
+    assert.equal(panel().props.style.paddingTop, '6px', 'the visual gap is inside the wrapper');
+    wrap().props.onMouseLeave();
+    advanceClock(179);
+    await redraw();
+    assert.ok(panel(), 'the panel stays open during the 180ms grace period');
+    advanceClock(1);
+    await redraw();
+    assert.equal(panel(), undefined, 'the panel closes after the grace period');
+
+    wrap().props.onMouseEnter(pointer);
+    await redraw();
+    wrap().props.onMouseLeave();
+    advanceClock(100);
+    wrap().props.onMouseEnter(pointer);
+    advanceClock(100);
+    await redraw();
+    assert.ok(panel(), 'returning before the deadline cancels the pending close');
+    wrap().props.onMouseLeave();
+    advanceClock(180);
+    await redraw();
+    assert.equal(panel(), undefined, 'a later leave starts a new close timer');
+
+    wrap().props.onMouseEnter(pointer);
+    await redraw();
+    wrap().props.onMouseLeave();
+    button().props.onClick(pointer);
+    await redraw();
+    advanceClock(180);
+    await redraw();
+    assert.ok(panel(), 'clicking to pin cancels an already pending close');
+    assert.equal(button().props['data-pinned'], 'true');
+    wrap().props.onMouseLeave();
+    advanceClock(180);
+    await redraw();
+    assert.ok(panel(), 'a pinned panel stays open on pointer leave');
+    wrap().props.onKeyDown({ key: 'Escape' });
+    await redraw();
+    assert.equal(panel(), undefined, 'Escape still closes the pinned panel');
+  } finally {
+    sandbox.setTimeout = originalTimeout;
+    sandbox.clearTimeout = originalClearTimeout;
+    sandbox.window.innerWidth = originalWidth;
+  }
 
   // 10. workspace rollup: membership from the registry, question is not "running"
   const wsRows = [
@@ -551,11 +647,11 @@ async function mount(component, props) {
   assert.equal(typeof settingsEntry.entry.label(), 'string');
 
   // 浮层每行都有“忽略”动作（按钮存在于此，点击行为即上面测过的 ignoreSession）
-  const sourceText = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8');
+  const sourceText = fs.readFileSync(CLIENT_SOURCE, 'utf8');
   assert.equal((sourceText.match(/className: 'sr-hdr-ignore'/g) || []).length, 1, 'one ignore button class in the row renderer');
   assert.equal((sourceText.match(/ignoreSession\(row\.id\)/g) || []).length, 1, 'and one place that writes the id');
 
-  console.log('client tabs: 14/14 groups passed');
+  console.log('client tabs: 15/15 groups passed');
 })().catch((error) => {
   console.error(error);
   process.exit(1);
