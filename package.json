@@ -1,8 +1,8 @@
 {
   "name": "dsh-session-rail",
-  "version": "0.1.16",
+  "version": "0.1.17-fork.1",
   "type": "module",
-  "description": "Session status at a glance for the DSH Web UI: five-state header counters (running / asking / error / interrupted / unread), a pinned hover panel, per-workspace badges in the left rail, and a Progress tab for long tasks.",
+  "description": "Unofficial fork of zengxiaolou/dsh-session-rail with a header hover-panel fix. Shows session status through header counters, workspace badges, and a Progress tab.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -34,11 +34,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zengxiaolou/dsh-session-rail.git"
+    "url": "git+https://github.com/qiyeren/dsh-session-rail.git"
   },
-  "homepage": "https://github.com/zengxiaolou/dsh-session-rail",
+  "homepage": "https://github.com/qiyeren/dsh-session-rail",
   "bugs": {
-    "url": "https://github.com/zengxiaolou/dsh-session-rail/issues"
+    "url": "https://github.com/qiyeren/dsh-session-rail"
   },
   "keywords": [
     "dsh",

@@ -1,10 +1,10 @@
 # 会话引导栏（Session Rail）
 
+> **非官方修复分叉 · 0.1.17-fork.1**：基于 [zengxiaolou/dsh-session-rail](https://github.com/zengxiaolou/dsh-session-rail) 的 0.1.16，修复顶部会话计数悬浮面板在鼠标移入途中消失的问题。该问题已在[上游 Issue #1](https://github.com/zengxiaolou/dsh-session-rail/issues/1) 记录；本分叉不代表原作者发布或背书，仅通过 GitHub Release 分发，**不发布到 npm**。
+
 ![dsh-session-rail](https://raw.githubusercontent.com/zengxiaolou/dsh-session-rail/main/docs/images/promo.png)
 
 <p>
-<a href="https://www.npmjs.com/package/dsh-session-rail"><img alt="npm" src="https://img.shields.io/npm/v/dsh-session-rail?color=2f81f7&label=npm"></a>
-<a href="https://www.npmjs.com/package/dsh-session-rail"><img alt="downloads" src="https://img.shields.io/npm/dw/dsh-session-rail?color=3fb950"></a>
 <a href="https://github.com/zengxiaolou/dsh-session-rail/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/npm/l/dsh-session-rail?color=bf8700"></a>
 <img alt="dsh plugin" src="https://img.shields.io/badge/DSH-plugin-7aa2ff">
 <a href="https://github.com/zengxiaolou/dsh-session-rail/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/zengxiaolou/dsh-session-rail?color=8250df"></a>
@@ -137,22 +137,28 @@ curl -s localhost:60606/api/session-rail/state | python3 -m json.tool
 
 `/state` 同时返回 `clientGraph`：`ours` 表示本插件的客户端模块在不在宿主的启动图里、`clientPath` 指向哪个文件。`ours: true` + `clientReports: []` = 打包没问题，只是页面还没重载。
 
-## 安装 / 卸载
+## 安装修复分叉
 
-```bash
-dsh plugin --profile desktop add /path/to/session-rail   # 本地目录，链接安装
+在 DSH 中让助手使用 `plugin_manager install_bundle` 安装下面的 GitHub Release 包，也可先下载再提供本地绝对路径：
+
+```text
+https://github.com/qiyeren/dsh-session-rail/releases/download/v0.1.17-fork.1/dsh-session-rail-0.1.17-fork.1.tgz
 ```
 
-装完**硬刷新浏览器**（Cmd/Ctrl+Shift+R）；宿主侧改动需重载插件行（关闭再打开）或重启 DSH。
+包名仍为 `dsh-session-rail`，安装会替换当前 profile 中已安装的同名插件，而不是并存；更改影响该 profile 的所有会话。本地文件方式安装时请保留安装包，不要在依赖尚指向它时移动或删除。兼容性范围沿用上游 `engines.dsh: ">=0.2.0-rc.1 <0.3.0-0"`。
+
+替换现有插件后，桌面端需要重新启动 DSH 才能确认新模块被加载；实际状态以插件管理器结果为准。该分叉也可从源码目录安装，但不要通过 npm 原包名安装来获取此修复。
 
 ## 测试
+
+在源码仓库中运行以下命令；Release 安装包不包含测试文件：
 
 ```bash
 npm test     # = node test/host.test.mjs && node test/client.test.cjs
 ```
 
-- `test/host.test.mjs`：自建临时 git 仓库与进度目录，覆盖 13 组断言（含 `/turn` 运行/闭合/未知会话、`/changes`、`/sources`、信标与 `/state`、传输守卫）。
-- `test/client.test.cjs`：stub React 渲染进度 tab 与顶部计数，覆盖描述符（只有一个）、badge、运行状态卡、空态，以及已读水位的基线 / 跃迁 / 跳转清理与“空闲只剩一颗点”的渲染。
+- `test/host.test.mjs`：自建临时 git 仓库与进度目录，覆盖 `/turn` 运行/闭合/未知会话、`/changes`、`/sources`、信标与 `/state`、传输守卫。
+- `test/client.test.cjs`：stub React 渲染进度 tab 与顶部计数，覆盖描述符、badge、状态卡、已读水位，以及悬浮窗定位、延迟关闭、重新进入和钉住行为。该测试不模拟真实桌面端的鼠标命中。
 
 两个测试都不碰真实工作区、不联网。
 
@@ -178,10 +184,6 @@ npm test     # = node test/host.test.mjs && node test/client.test.cjs
 
 新增语言：在 `locale/` 加一份同名 JSON，并在 `HEADER_TEXT` 里加同键字典；缺键时回落到 `zh`，不会显示 key。
 
-## 市场与发布
+## 分叉发布说明
 
-- npm：`npm publish --registry=https://registry.npmjs.org`（默认 registry 若是镜像站，必须显式指定）。
-- 市场收录：条目在 [`market/dsh-session-rail.yml`](market/dsh-session-rail.yml)，格式即 awesome-dsh-plugin 的
-  `data/plugins/<owner>__<repo>.yml`（一个文件就是全部投稿）。合并后由其脚本生成列表，`dshmarket.com/index.json` 再抓取它。
-  `category: session`，`description.en` 必填、`zh` 可选；图标省略时回退到作者头像。
-- 版本策略：只递增补丁位（`0.1.9 → 0.1.10`），只有大改才动 middle 位。
+此非官方分叉只在 [GitHub Releases](https://github.com/qiyeren/dsh-session-rail/releases) 提供安装包，不发布到 npm；上游仓库、上游 npm 包和原作者的市场条目不会因此更新。分叉仓库的 GitHub Actions 当前关闭，避免继承的自动发布工作流误发布上游同名 npm 包。原项目的 MIT 许可证及版权声明保留在 [LICENSE](LICENSE)。
