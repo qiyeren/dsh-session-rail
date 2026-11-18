@@ -124,6 +124,46 @@ async function mount(component, props) {
   const { id, mod, sandbox } = loadModule();
   assert.equal(id, 'dsh-session-rail');
 
+  // All eight feature combinations gate registration independently; settings remain available.
+  const keys = mod.internals.FEATURE_KEYS;
+  for (let mask = 0; mask < 8; mask++) {
+    localStore.clear();
+    for (const [index, feature] of ['header', 'badges', 'progress'].entries()) {
+      localStore.set(keys[feature], mask & (1 << index) ? 'on' : 'off');
+    }
+    const registered = [];
+    const slots = {
+      inject: (_slot, fn) => fn(),
+      register: (descriptor) => { registered.push(descriptor.id); return () => {}; },
+    };
+    const sidebar = { registerTab: (descriptor) => { registered.push(descriptor.id); return () => {}; } };
+    const testCtx = {
+      effect: (fn) => fn(),
+      get: (name) => name === 'slots' ? slots : name === 'betterSidebar' ? sidebar : undefined,
+      inject: (_deps, fn) => fn(testCtx),
+    };
+    mod.apply(testCtx);
+    assert.equal(registered.includes('session-rail:header-counts'), !!(mask & 1));
+    assert.equal(registered.includes('session-rail:workspace-badges'), !!(mask & 2));
+    assert.equal(registered.includes('session-rail:progress'), !!(mask & 4));
+    assert.equal(registered.includes('session-rail:ignored'), true);
+  }
+  localStore.clear();
+  for (const feature of ['header', 'badges', 'progress']) assert.equal(mod.internals.featureEnabled(feature), true);
+  localStore.set(keys.badges, 'off');
+  assert.equal(mod.internals.featureEnabled('badges'), false, 'legacy badge setting remains effective');
+  localStore.clear();
+  const settingsModule = loadModule().mod;
+  let settingsView = await mount(settingsModule.internals.SettingsSection, {});
+  const toggles = settingsView.nodes.filter((node) => node.type === 'input' && node.props.type === 'checkbox');
+  assert.equal(toggles.length, 3);
+  assert.ok(toggles.every((node) => node.props.checked));
+  toggles[1].props.onChange({ target: { checked: false } });
+  assert.equal(localStore.get(keys.badges), 'off');
+  settingsView = await mount(settingsModule.internals.SettingsSection, {});
+  assert.deepEqual(settingsView.nodes.filter((node) => node.type === 'input').map((node) => node.props.checked), [true, false, true]);
+  localStore.clear();
+
   // 1. no betterSidebar service: apply must not throw and must register nothing
   const emptyCtx = { effect: (fn) => fn(), get: () => undefined, inject: (keys, cb) => cb(emptyCtx) };
   assert.doesNotThrow(() => mod.apply(emptyCtx));

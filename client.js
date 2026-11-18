@@ -383,7 +383,12 @@ window.__ModuleLoader__.load({
         openHint: '点击会话即可跳转',
         summary: '{running} 个进行中，{question} 个等你回答，{unread} 个未读，{interrupted} 个中断，{error} 个出错',
         ignoreRow: '忽略',
-        settingsTitle: '会话计数',
+        settingsTitle: '会话引导栏',
+        featureHeader: '顶部五态会话计数',
+        featureBadges: '左栏工作区徽标',
+        featureProgress: '右栏进度视图',
+        featureRefresh: '修改后请刷新页面生效；设置仅保存在当前客户端。',
+        featureSaveError: '无法保存设置，请检查客户端存储权限。',
         settingsDesc: '定时任务跑完之后不再计入未读；失败或中断的仍然计入。',
         ignoredCount: '已忽略 {count} 条',
         ignoredNone: '已忽略 0 条',
@@ -405,7 +410,12 @@ window.__ModuleLoader__.load({
         openHint: 'Click a Session to open it',
         summary: '{running} live, {question} asking, {unread} unread, {interrupted} stopped, {error} failed',
         ignoreRow: 'Ignore',
-        settingsTitle: 'Session counts',
+        settingsTitle: 'Session Rail',
+        featureHeader: 'Header session counts',
+        featureBadges: 'Workspace badges',
+        featureProgress: 'Progress sidebar view',
+        featureRefresh: 'Refresh the page to apply changes; settings are stored on this client only.',
+        featureSaveError: 'Could not save settings; check client storage permissions.',
         settingsDesc: 'Finished scheduled-task runs stop counting as unread; failed or stopped runs still count.',
         ignoredCount: '{count} ignored',
         ignoredNone: 'None ignored',
@@ -1229,13 +1239,21 @@ window.__ModuleLoader__.load({
     const BADGE_PAINT_MS = 1500;
     const WORKSPACE_POLL_MS = 60_000;
 
-    function workspaceBadgeEnabled() {
+    const FEATURE_KEYS = {
+      header: 'dsh-session-rail:header-counts:v1',
+      badges: BADGE_TOGGLE_KEY,
+      progress: 'dsh-session-rail:progress-view:v1',
+    };
+
+    function featureEnabled(feature) {
       try {
-        return window?.localStorage?.getItem?.(BADGE_TOGGLE_KEY) !== 'off';
+        return window?.localStorage?.getItem?.(FEATURE_KEYS[feature]) !== 'off';
       } catch {
         return true;
       }
     }
+
+    function workspaceBadgeEnabled() { return featureEnabled('badges'); }
 
     /**
      * @param rows - root Sessions, already filtered of blank and subagent rows.
@@ -1431,8 +1449,26 @@ window.__ModuleLoader__.load({
      */
     function SettingsSection() {
       const ignoreStore = useIgnoreStore();
+      const [features, setFeatures] = useState(() => Object.fromEntries(Object.keys(FEATURE_KEYS).map((key) => [key, featureEnabled(key)])));
+      const [saveError, setSaveError] = useState(false);
       const count = Array.isArray(ignoreStore?.sessions) ? ignoreStore.sessions.length : 0;
+      const toggle = (key, checked) => {
+        try {
+          if (!window?.localStorage) throw new Error('storage unavailable');
+          window.localStorage.setItem(FEATURE_KEYS[key], checked ? 'on' : 'off');
+          setFeatures((previous) => ({ ...previous, [key]: checked }));
+          setSaveError(false);
+        } catch {
+          setSaveError(true);
+        }
+      };
       return h('div', { style: SETTINGS.wrap },
+        ...[['header', 'featureHeader'], ['badges', 'featureBadges'], ['progress', 'featureProgress']].map(([key, label]) =>
+          h('label', { key, style: SETTINGS.line },
+            h('input', { type: 'checkbox', checked: features[key], onChange: (event) => toggle(key, event.target.checked) }),
+            h('span', null, headerT(label)))),
+        h('div', { style: SETTINGS.desc }, headerT('featureRefresh')),
+        saveError ? h('div', { role: 'alert', style: SETTINGS.desc }, headerT('featureSaveError')) : null,
         h('div', { key: 'line', style: SETTINGS.line },
           h('span', { key: 'count', style: SETTINGS.count },
             count === 0 ? headerT('ignoredNone') : headerT('ignoredCount', { count })),
@@ -1481,7 +1517,7 @@ window.__ModuleLoader__.load({
       reconcileSeen, readCounts, readSessionRows, readPendingInteractions, HeaderCounts, HEADER_TEXT, SEEN_KEY,
       rollupByWorkspace, paintWorkspaceBadges, WorkspaceBadges, BADGE_ATTR, BADGE_TOGGLE_KEY,
       IGNORE_KEY, readIgnoreStore, writeIgnoreStore, ignoreSession, clearIgnoredSessions, ignoredIdSet,
-      isQuietAutomationRun, subscribeIgnore, SettingsSection, AUTOMATION_PREFIX,
+      isQuietAutomationRun, subscribeIgnore, SettingsSection, AUTOMATION_PREFIX, FEATURE_KEYS, featureEnabled,
     },
       apply(ctx) {
         let locale;
@@ -1607,13 +1643,13 @@ window.__ModuleLoader__.load({
         if (typeof ctx.inject === 'function') {
           // Non-blocking: the tab types appear as soon as dsh-better-sidebar's
           // client half publishes its service, which may be later than this apply.
-          ctx.inject(['betterSidebar'], registerAll);
+          if (featureEnabled('progress')) ctx.inject(['betterSidebar'], registerAll);
           // The header seat needs the slot registry and the session list; both
           // belong to core client packages, but neither is guaranteed at apply time.
-          ctx.inject(['slots', 'sessions'], registerHeader);
-          ctx.inject(['slots', 'sessions'], registerBadges);
+          if (featureEnabled('header')) ctx.inject(['slots', 'sessions'], registerHeader);
+          if (featureEnabled('badges')) ctx.inject(['slots', 'sessions'], registerBadges);
           ctx.inject(['slots'], registerSettings);
-          setTimeout(() => {
+          if (featureEnabled('progress')) setTimeout(() => {
             try {
               if (!ctx.get('betterSidebar')) {
                 console.warn('[session-rail] betterSidebar 服务未出现，进度标签未注册（是否停用了 dsh-better-sidebar？）');
@@ -1623,8 +1659,9 @@ window.__ModuleLoader__.load({
             }
           }, SERVICE_DIAGNOSTIC_MS);
         } else {
-          registerAll(ctx);
-          registerHeader(ctx);
+          if (featureEnabled('progress')) registerAll(ctx);
+          if (featureEnabled('header')) registerHeader(ctx);
+          if (featureEnabled('badges')) registerBadges(ctx);
           registerSettings(ctx);
         }
       },
